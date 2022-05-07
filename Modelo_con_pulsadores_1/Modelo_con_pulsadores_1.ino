@@ -12,6 +12,27 @@
 //Configuracion de pin de ADC
 #define ADCpin  34
 
+/*Variables Globales*/
+bool EstadoPulsador=false;
+bool EstadoAnterior=false;
+float medicion=0;
+
+//Defino Maquina de estados para valor a mostrar
+typedef enum{
+  Medidor_De_Radiacion,
+  GPS
+} estadoMEF_t;
+
+estadoMEF_t estadoActual, estadoAnterior; // Variable de estado (global)
+
+
+/*Prototipos de Funciones*/
+void GPS_Comunication(void);
+void GPS_Show_Data(void);
+void MedidorDeRadiacion_Show_Data(void);
+void actualizarSemaforo(int Pulsador);
+
+
 void setup()
 {
   Serial.begin(115200);//Comunicacion entre ESP32 y Monitor Serie
@@ -24,20 +45,43 @@ void setup()
 
 void loop(){
 
-  Serial.println(digitalRead(Pulsador_1));
-  Serial.println(digitalRead(Pulsador_2));
-
-  if(digitalRead(Pulsador_1)){
-    Serial.println("PULSADOR 1 PRESIONADO");
-    digitalWrite(BLINK, HIGH);
-  }
-  else if(digitalRead(Pulsador_2)){
-    Serial.println("LED APAGADO");
-    digitalWrite(BLINK, LOW);
-  }
-  else{
-    Serial.println("Ningun Pulsador es oprimido");
-  }
+  actualizarSemaforo(Pulsador_1);
   
   delay(100);
+}
+
+// Función Actualizar MEF
+void actualizarSemaforo(int Pulsador)
+{
+  switch (estadoActual){
+    case Medidor_De_Radiacion:
+    {
+      //Codigo
+      Serial.println("PULSADOR 1 PRESIONADO");
+      digitalWrite(BLINK, HIGH);
+
+      if(digitalRead(Pulsador)){
+        estadoActual=GPS;
+      }
+    }
+    break;
+
+    case GPS:
+    {
+      //Codigo
+      Serial.println("LED APAGADO");
+      digitalWrite(BLINK, LOW);
+
+      if(digitalRead(Pulsador)){
+        estadoActual=Medidor_De_Radiacion;
+      }
+    }
+    break;
+    
+    default:{
+      //Por defecto cae en medidor de Radiacion
+      estadoActual = Medidor_De_Radiacion;
+    }
+    break;
+  } 
 }
