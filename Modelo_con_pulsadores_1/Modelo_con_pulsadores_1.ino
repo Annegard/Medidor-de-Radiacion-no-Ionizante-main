@@ -13,11 +13,6 @@
 #define ADCpin  34
 #define T_ESPERA 10 
 
-/*Variables Globales*/
-bool EstadoPulsador=false;
-bool EstadoAnterior=false;
-float medicion=0;
-
 //Defino Maquina de estados para valor a mostrar
 typedef enum{
   Medidor_De_Radiacion,
@@ -32,7 +27,6 @@ typedef enum{
    DESCENDENTE,
    ASCENDENTE
 } estadoBoton_t;
-
 estadoBoton_t estadoPulsador;
 
 /*Prototipos de Funciones*/
@@ -40,12 +34,11 @@ void GPS_Comunication(void);
 void GPS_Show_Data(void);
 void MedidorDeRadiacion_Show_Data(void);
 void actualizarProceso(void);
-void actualizarBoton(int Pulsador);
+void actualizarBoton(int pulsador);
 
 void setup()
 {
   Serial.begin(115200);//Comunicacion entre ESP32 y Monitor Serie
-
   //Declaracion de Pulsadores
   pinMode(Pulsador_1, INPUT_PULLUP);//Cambiar valor a mostrar
   pinMode(Pulsador_2, INPUT_PULLUP);//A definir
@@ -55,19 +48,20 @@ void setup()
 void loop(){
 
   actualizarBoton(Pulsador_1);
-
+  //actualizarBoton(Pulsador_2);
+  Serial.println(digitalRead(Pulsador_1));
   switch(EstadoActual){
     case Medidor_De_Radiacion:
     {
       //Codigo
-      Serial.println("Ver Medidor de Radiacion");
+      //Serial.println("Ver Medidor de Radiacion");
     }
     break;
 
     case GPS:
     {
       //Codigo
-      Serial.println("Ver GPS");
+      //Serial.println("Ver GPS");
     }
     break;
     
@@ -87,25 +81,26 @@ void actualizarProceso()
   }
   else{
     EstadoActual = Medidor_De_Radiacion;
-  }
-  
+  } 
 }
 
 //Actualización de la MEF
 void actualizarBoton(int pulsador)
 {
-  uint8_t contDescendente = 0;
-  uint8_t contAscendente = 0;
+  static uint8_t contDescendente = 0;
+  static uint8_t contAscendente = 0;
 
    switch(estadoPulsador){
 
-      case BAJO: 
-         if( digitalRead(pulsador) ){
+      case BAJO:
+      Serial.println("Estado Bajo"); 
+         if( digitalRead(pulsador)==1 ){
             estadoPulsador = ASCENDENTE;
          }
       break;
 
-      case ASCENDENTE:      
+      case ASCENDENTE:
+      Serial.println("Estado asc ");       
          if( contAscendente >= T_ESPERA ){
             if( digitalRead(pulsador) ){
                estadoPulsador = ALTO;
@@ -116,15 +111,18 @@ void actualizarBoton(int pulsador)
             contAscendente = 0;
          }
          contAscendente++;
+         delay(1);
       break;
 
       case ALTO:
+      Serial.println("Estado alto"); 
          if( !digitalRead(pulsador) ){
             estadoPulsador = DESCENDENTE;
          }
       break;
 
-      case DESCENDENTE:      
+      case DESCENDENTE:
+      Serial.println("Estado desent ");       
          if( contDescendente >= T_ESPERA ){
             if( !digitalRead(pulsador) ){
               Serial.println("Cambiar Modo");
@@ -137,6 +135,7 @@ void actualizarBoton(int pulsador)
             contDescendente = 0;
          }
          contDescendente++;
+         delay(1);
       break;
 
       default:
