@@ -11,6 +11,7 @@
 #define TX_GPS  13
 //Configuracion de pin de ADC
 #define ADCpin  34
+#define T_ESPERA 10 
 
 /*Variables Globales*/
 bool EstadoPulsador=false;
@@ -21,17 +22,25 @@ float medicion=0;
 typedef enum{
   Medidor_De_Radiacion,
   GPS
-} estadoMEF_t;
+} estadoProceso_t;
 
-estadoMEF_t estadoActual, estadoAnterior; // Variable de estado (global)
+estadoProceso_t EstadoActual; // Variable de estado (global)
 
+typedef enum{
+   ALTO,
+   BAJO,
+   DESCENDENTE,
+   ASCENDENTE
+} estadoBoton_t;
+
+estadoBoton_t estadoPulsador;
 
 /*Prototipos de Funciones*/
 void GPS_Comunication(void);
 void GPS_Show_Data(void);
 void MedidorDeRadiacion_Show_Data(void);
-void actualizarSemaforo(int Pulsador);
-
+void actualizarProceso(void);
+void actualizarBoton(int Pulsador);
 
 void setup()
 {
@@ -45,43 +54,93 @@ void setup()
 
 void loop(){
 
-  actualizarSemaforo(Pulsador_1);
-  
-  delay(100);
-}
+  actualizarBoton(Pulsador_1);
 
-// Función Actualizar MEF
-void actualizarSemaforo(int Pulsador)
-{
-  switch (estadoActual){
+  switch(EstadoActual){
     case Medidor_De_Radiacion:
     {
       //Codigo
-      Serial.println("PULSADOR 1 PRESIONADO");
-      digitalWrite(BLINK, HIGH);
-
-      if(digitalRead(Pulsador)){
-        estadoActual=GPS;
-      }
+      Serial.println("Ver Medidor de Radiacion");
     }
     break;
 
     case GPS:
     {
       //Codigo
-      Serial.println("LED APAGADO");
-      digitalWrite(BLINK, LOW);
-
-      if(digitalRead(Pulsador)){
-        estadoActual=Medidor_De_Radiacion;
-      }
+      Serial.println("Ver GPS");
     }
     break;
     
     default:{
       //Por defecto cae en medidor de Radiacion
-      estadoActual = Medidor_De_Radiacion;
+      EstadoActual = Medidor_De_Radiacion;
     }
     break;
-  } 
+  }
+}
+
+// Función Actualizar MEF
+void actualizarProceso()
+{
+  if(EstadoActual == Medidor_De_Radiacion){
+    EstadoActual = GPS;
+  }
+  else{
+    EstadoActual = Medidor_De_Radiacion;
+  }
+  
+}
+
+//Actualización de la MEF
+void actualizarBoton(int pulsador)
+{
+  uint8_t contDescendente = 0;
+  uint8_t contAscendente = 0;
+
+   switch(estadoPulsador){
+
+      case BAJO: 
+         if( digitalRead(pulsador) ){
+            estadoPulsador = ASCENDENTE;
+         }
+      break;
+
+      case ASCENDENTE:      
+         if( contAscendente >= T_ESPERA ){
+            if( digitalRead(pulsador) ){
+               estadoPulsador = ALTO;
+            }
+            else{
+               estadoPulsador = BAJO;
+            }
+            contAscendente = 0;
+         }
+         contAscendente++;
+      break;
+
+      case ALTO:
+         if( !digitalRead(pulsador) ){
+            estadoPulsador = DESCENDENTE;
+         }
+      break;
+
+      case DESCENDENTE:      
+         if( contDescendente >= T_ESPERA ){
+            if( !digitalRead(pulsador) ){
+              Serial.println("Cambiar Modo");
+              actualizarProceso();
+              estadoPulsador = BAJO;
+            }
+            else{
+              estadoPulsador = ALTO;
+            }
+            contDescendente = 0;
+         }
+         contDescendente++;
+      break;
+
+      default:
+        estadoPulsador = BAJO;
+      break;
+   }
 }
