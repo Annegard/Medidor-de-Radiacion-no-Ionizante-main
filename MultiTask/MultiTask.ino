@@ -1,5 +1,5 @@
 #include <TridentTD_EasyFreeRTOS32.h>
-
+//S
 TridentOS   task1, task2;  // Crea tantas tareas como puedas.
 void myblink(void*); 
 void myprint(void*);   //nombre de la función la tarea se ejecutará

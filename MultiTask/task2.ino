@@ -95,7 +95,7 @@ void actualizarBoton(int pulsador)
             estadoPulsador = ASCENDENTE;
          }
       break;
-
+//D
       case ASCENDENTE:
 
          if( contAscendente >= T_ESPERA ){
