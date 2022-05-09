@@ -34,16 +34,6 @@ void loop(){
    //Codigo
 }
 
-void I2C_Init(){
-  pinMode(SDA, OUTPUT);
-  pinMode(SCL, OUTPUT);
-  //hacemos un soft reset de la memoria
-  softReset();
-   
-  enviarStartBit();//envio bit de start
-  enviarDeviceAddress(Addres,1);//DIRECCION DEL ESCLAVO EN MODO LECTURA
-  if(recibirAck()== FALSE) softReset();
-}
 /*funcion que lee la palabra enviada y la escribe caracter por caracter ya que no se puede
 enviar una cadena de texto directamente(sacado de internet)
 Ej de imprimir datos sin la funcion print:
@@ -180,6 +170,17 @@ void enviarStoptBit(void){
    return;
 }
 
+void I2C_Init(){
+  pinMode(SDA, OUTPUT);
+  pinMode(SCL, OUTPUT);
+  //hacemos un soft reset de la memoria
+  softReset();
+   
+  enviarStartBit();//envio bit de start
+  enviarDeviceAddress(Addres,1);//DIRECCION DEL ESCLAVO EN MODO LECTURA
+  if(recibirAck()== FALSE) softReset();
+}
+
 /*Funcion para enviar bit a bit*/
 void enviarBit(char Bit)
 {
@@ -213,6 +214,9 @@ void enviarByte(char Byte)
         Byte = (Byte << 1) | (Byte >> 7);
         enviarBit(Byte);
     }
+
+    if(recibirAck()== FALSE) softReset();
+    
     return;
 }
 
