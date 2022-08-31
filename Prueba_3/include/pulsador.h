@@ -13,6 +13,12 @@
 
 typedef enum
 {
+    ADC,
+    GPS
+} estadoLCD;
+
+typedef enum
+{
     ALTO,
     BAJO,
     DESCENDENTE,
@@ -23,15 +29,10 @@ typedef struct
 {
     gpio_int_type_t tecla;
     estadoPulsador estado;   //variables
-    TickType_t tiempoBajo;		//tiempo de la última transición del estado alto a bajo
-    TickType_t tiempoAlto;		    //tiempo de la última transición del estado bajo a alto
-    TickType_t diferenciaTiempo;	    //variables
-    SemaphoreHandle_t semaforo;
 } pulsadorInfo;
 
 /*==================[Prototipos de funciones]======================*/
 void inicializarPulsador(  void );
-TickType_t obtenerDiferencia( uint8_t  indice);
-void borrarDiferencia( uint8_t  indice );
+bool actualizarPulsador( uint8_t  indice);//Cada vez que se la llama consulta el estado del pulsador que recibe como parametro
 
 #endif
