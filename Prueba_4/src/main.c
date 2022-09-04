@@ -23,7 +23,7 @@
 // #include "freertos/semphr.h" //semaforo
 #include "freertos/task.h"   //libreria Tareas
 #include "driver/gpio.h"     //pines generales
-#include "esp_log.h"
+#include "esp_log.h"//color para los sprintf, Hacen falta?
 #include "sdkconfig.h"
 // #include "soc/soc.h"          //disable brownout detector
 // #include "soc/rtc_cntl_reg.h" //disable brownout detector (deteccion de apagon)
@@ -182,7 +182,7 @@ void PRESENTACION_LCD()
             @Altitud
 
         Mientras que la trama de datos RMC contiene:
-            @Velidad
+            @Velocidad
             @Fecha (Día, Mes, Año)
             @Curso (Esta te juro que no tengo idea para que sirve)
 
@@ -252,9 +252,12 @@ void GPS_LCD()
         
         //sprintf aglomera todos los datos que se le pasen como parametro y los guarda como una sola cadena de caracteres en lcdBuffer
         //genera la siguiente cadena de caracteres: "Horas:Minutos:Segundos, DíaMesAño"
-        sprintf(lcdBuffer, "%02d:%02d:%02d, %02d%02d%02d", gpsData.ggastruct.tim.hour,
-                gpsData.ggastruct.tim.min, gpsData.ggastruct.tim.sec, gpsData.rmcstruct.date.Day,
-                gpsData.rmcstruct.date.Mon, gpsData.rmcstruct.date.Yr);
+        sprintf(lcdBuffer, "%02d:%02d:%02d, %02d%02d%02d"   , gpsData.ggastruct.tim.hour    //Estructura GGA/Hora
+                                                            , gpsData.ggastruct.tim.min     //Estructura GGA/Minutos
+                                                            , gpsData.ggastruct.tim.sec     //Estructura GGA/Segundos
+                                                            , gpsData.rmcstruct.date.Day    //Estructura RMC/Día
+                                                            , gpsData.rmcstruct.date.Mon    //Estructura RMC/Mes
+                                                            , gpsData.rmcstruct.date.Yr);   //Estructura RMC/Año
 
         lcd_print(lcdBuffer);//imprimo la cadena de caracteres obtenida en el LCD
 
@@ -266,8 +269,10 @@ void GPS_LCD()
                                                     Latitud(con 2 cifras despues de la coma),
                                                     Signo de la longitud(para indicar si este o oeste),
                                                     Longitud(con 2 cifras despues de la coma)"*/
-        sprintf(lcdBuffer, "%c%.2f, %c%.2f  ", gpsData.ggastruct.lcation.NS, gpsData.ggastruct.lcation.latitude,
-                gpsData.ggastruct.lcation.EW, gpsData.ggastruct.lcation.longitude);
+        sprintf(lcdBuffer, "%c%.2f, %c%.2f  "   , gpsData.ggastruct.lcation.NS          //Estructura GGA/Norte o Sur
+                                                , gpsData.ggastruct.lcation.latitude    //Estructura GGA/Latitud
+                                                , gpsData.ggastruct.lcation.EW          //Estructura GGA/Este o Oeste
+                                                , gpsData.ggastruct.lcation.longitude); //Estructura GGA/Longitud
 
         lcd_print(lcdBuffer);//imprimo la cadena de caracteres obtenida en el LCD
     }
