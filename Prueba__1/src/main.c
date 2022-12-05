@@ -23,7 +23,7 @@
 // #include "freertos/semphr.h" //semaforo
 #include "freertos/task.h"   //libreria Tareas
 #include "driver/gpio.h"     //pines generales
-#include "esp_log.h"//color para los sprintf, Hacen falta?
+#include "esp_log.h"
 #include "sdkconfig.h"
 // #include "soc/soc.h"          //disable brownout detector
 // #include "soc/rtc_cntl_reg.h" //disable brownout detector (deteccion de apagon)
@@ -35,7 +35,7 @@
 #include "../include/Uart.h"
 #include "../include/LCDI2C.h"
 #include "../include/pulsador.h"
-#include "../include/NMEA.h"
+//#include "../include/NMEA.h"
 
 // //=========================== Variables y Definiciones ================================
 // DEFINICIONES
@@ -57,8 +57,8 @@ gpio_int_type_t led = GPIO_NUM_2;
 // GPS
 char GGA[100];
 char RMC[100];
-GPSSTRUCT gpsData;
-int flagGGA = 0, flagRMC = 0;
+//GPSSTRUCT gpsData;
+//int flagGGA = 0, flagRMC = 0;
 char lcdBuffer[50];
 int GPS_Timeout = TiempoFuera; // GGA or RMC will not be received if the VCC is not sufficient
 
@@ -73,31 +73,27 @@ void app_main()
 {
     I2C_init();            // Inicializo el i2c
     LCDI2C_init();         // Inicializo el LCD
-    Uart_init2();          // Configuro el uart para recibir datos
     inicializarPulsador(); // Inicializo pulsadores
-
     // Configuracion de ADC
     adc1_config_width(ADC_WIDTH_12Bit); // configuran la resoluncion
-    adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_11db);
+    adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_11db);
+    init_uart_0();
+    Uart_init2();
 
     // PRESENTACION LCD
-    // lcd_gotoxy(1, 1); // Imprimo fila 1 en display
-    // lcd_print("Hola!");
-    // vTaskDelay(2000 / portTICK_PERIOD_MS);
 
     // Crear tarea en freeRTOS
     // Devuelve pdPASS si la tarea fue creada y agregada a la lista ready
     // En caso contrario devuelve pdFAIL.
-
+   
     BaseType_t res1 = xTaskCreatePinnedToCore(
-        TareaProcesadorA,             // Funcion de la tarea a ejecutar
+        TareaProcesadorA,             // 
         "TareaProcesadorA",           // Nombre de la tarea como String amigable para el usuario
-        configMINIMAL_STACK_SIZE * 4, // Cantidad de stack de la tarea
+        configMINIMAL_STACK_SIZE * 10, // Cantidad de stack de la tarea
         NULL,                         // Parametros de tarea
         tskIDLE_PRIORITY,             // Prioridad de la tarea -> Queremos que este un nivel encima de IDLE
         NULL,                         // Puntero a la tarea creada en el sistema
         PROCESADORA);
-
     // Gestion de errores
     if (res1 == pdPASS)
     {
@@ -109,6 +105,8 @@ void app_main()
         while (true)
             ; // si no pudo crear la tarea queda en un bucle infinito
     }
+    
+    vTaskDelay(500 / portTICK_PERIOD_MS);//Tiempo de espera para crear tarea.
 
     BaseType_t res2 = xTaskCreatePinnedToCore(
         TareaProcesadorB,             // Funcion de la tarea a ejecutar
@@ -182,7 +180,7 @@ void PRESENTACION_LCD()
             @Altitud
 
         Mientras que la trama de datos RMC contiene:
-            @Velocidad
+            @Velidad
             @Fecha (Día, Mes, Año)
             @Curso (Esta te juro que no tengo idea para que sirve)
 
@@ -195,111 +193,12 @@ void PRESENTACION_LCD()
 */
 void GPS_LCD()
 {
-    // printf("%i\n", GPS_Timeout);
-
-    /*  La funcion rx_uart_Available() recibe como primer parametro la palabra a buscar dentro de la trama de datos
-        y copia la direccion de dicha palabra en el puntero que recibe como segundo parametro. devuelve true o false
-        dependiendo de si habia o no datos en el buffer del puerto UART, no necesariamente tiene que recibir datos 
-        correctos del GPS para que devuelva true, solo con recibir cualquier valor alcanza.
-
-        bool rx_uart_Available(char *str, char *buffertocopyinto);
-
-        @char *str: Palabra a buscar dentro de la trama del UART.
-        @char *buffertocopyinto: donde guardar la direccion de la palabra hallada.
-        */
-    if (rx_uart_Available("GGA", GGA) == 1)//Si se logra conectar con el GPS
+    /*if (rx_uart_Available("GGA", GGA) == 1)//Si se logra conectar con el GPS
     {
-        GPS_Timeout = TiempoFuera; // Resetea el tiempo fuera indicando que se estan recibiendo datos del GPS
-
-        /* Decodificar datos de la trama GGA
-            @GGAbuffer  Es la direccion donde se almacena la trama de datos GGA recibida del GPS y guardada por el puerto UART
-            @GGASTRUCT  Es el puntero a la estructura GGA dentro de la estructura gpsData
-            @Returns    0 En caso de completar la trama de datos devuelve cero
-            @Returns    1, 2 dependiendo de si la trama de datos es valida o invalida (cuenta las comas y revisa la cantidad de
-                        caracteres que posean longitud y latitud)
-        */
-        if (decodeGGA(GGA, &gpsData.ggastruct) == 0)
-            flagGGA = 2; // Indica que la trama de datos es valida
-        else
-            flagGGA = 1; // Indica que la trama de datos es invalida
-    }
-    else
-    {
-        --GPS_Timeout;
-    }
-
-    if (rx_uart_Available("RMC", RMC) == 1)
-    {
-        GPS_Timeout = TiempoFuera; // Resetea el tiempo fuera indicando que se estan recibiendo datos del GPS
-
-        /* Decodificar datos de la trama RMC
-            @RMCbuffer  Es la direccion donde se almacena la trama de datos RMC recibida del GPS y guardada por el puerto UART
-            @RMCSTRUCT  Es el puntero a la estructura RMC dentro de la estructura gpsData
-            @Returns    0 En caso de completar la trama de datos devuelve cero
-            @Returns    1, 2 dependiendo de si la trama de datos es valida o invalida (cuenta las comas y revisa la cantidad de
-                        caracteres que posean longitud y latitud)
-        */
-        if (decodeRMC(RMC, &gpsData.rmcstruct) == 0)
-            flagRMC = 2; // Indica que la trama de datos es valida
-        else
-            flagRMC = 1; // Indica que la trama de datos es invalida
-    }
-
-    //En caso de que la bandera indique los datos son validos
-    if ((flagGGA == 2) | (flagRMC == 2))
-    {
-        lcd_gotoxy(0, 0);
-        
-        //sprintf aglomera todos los datos que se le pasen como parametro y los guarda como una sola cadena de caracteres en lcdBuffer
-        //genera la siguiente cadena de caracteres: "Horas:Minutos:Segundos, DíaMesAño"
-        sprintf(lcdBuffer, "%02d:%02d:%02d, %02d%02d%02d"   , gpsData.ggastruct.tim.hour    //Estructura GGA/Hora
-                                                            , gpsData.ggastruct.tim.min     //Estructura GGA/Minutos
-                                                            , gpsData.ggastruct.tim.sec     //Estructura GGA/Segundos
-                                                            , gpsData.rmcstruct.date.Day    //Estructura RMC/Día
-                                                            , gpsData.rmcstruct.date.Mon    //Estructura RMC/Mes
-                                                            , gpsData.rmcstruct.date.Yr);   //Estructura RMC/Año
-
-        lcd_print(lcdBuffer);//imprimo la cadena de caracteres obtenida en el LCD
-
-        memset(lcdBuffer, '\0', 50);//limpio del buffer
-
-        lcd_gotoxy(0, 1);
-        
-        /*genera la siguiente cadena de caracteres:"Signo de la latitud(para indicar si norte o sur),
-                                                    Latitud(con 2 cifras despues de la coma),
-                                                    Signo de la longitud(para indicar si este o oeste),
-                                                    Longitud(con 2 cifras despues de la coma)"*/
-        sprintf(lcdBuffer, "%c%.2f, %c%.2f  "   , gpsData.ggastruct.lcation.NS          //Estructura GGA/Norte o Sur
-                                                , gpsData.ggastruct.lcation.latitude    //Estructura GGA/Latitud
-                                                , gpsData.ggastruct.lcation.EW          //Estructura GGA/Este o Oeste
-                                                , gpsData.ggastruct.lcation.longitude); //Estructura GGA/Longitud
-
-        lcd_print(lcdBuffer);//imprimo la cadena de caracteres obtenida en el LCD
-    }
-
-    else if ((flagGGA == 1) | (flagRMC == 1))
-    {
-        // En lugar de limpiar la pantalla, es mejor si se imprimimos espacios.
-        lcd_gotoxy(0, 0);
-        lcd_print("NO HAY SATELITES");
-        // vTaskDelay(1000 / portTICK_PERIOD_MS);
-        lcd_gotoxy(0, 1);
-        lcd_print("POR FAVOR ESPERE");
-    }
-
-    if (GPS_Timeout <= 0)
-    {
-        GPS_Timeout = TiempoFuera; // Resetea el tiempo fuera
-
-        // Coloco banderas de trama de datos a 0
-        flagGGA = flagRMC = 0;
-
-        lcd_gotoxy(0, 0);
-        lcd_print("GPS DESCONECTADO");
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-        lcd_gotoxy(0, 1);
-        lcd_print("CHECK CONNECTION");
-    }
+    lcd_gotoxy(1, 1);
+    lcd_print(" no se encontro caracter");
+       
+    }*/
 }
 
 void TareaProcesadorA(void *taskParmPtr)
@@ -308,8 +207,8 @@ void TareaProcesadorA(void *taskParmPtr)
     {
         // // bucle del ADC
 
-        // LecturaADC = adc1_get_raw(ADC1_CHANNEL_0); // Leo el ADC
-
+        LecturaADC = adc1_get_raw(ADC1_CHANNEL_6); // Leo el ADC
+        
         if (ESTADO)
         {
             if (Auxiliar1) // Hago esto para que se ejecute por unica vez
@@ -318,17 +217,14 @@ void TareaProcesadorA(void *taskParmPtr)
                 Auxiliar2 = true;  // Lo paso a True para que cuando vuelva al GPS ejecute lo que esta dentro del IF
 
                 lcdCommand(0x01);                     // Limpio la pantalla del LCD
-                vTaskDelay(100 / portTICK_PERIOD_MS); // tiempo que necesita el LCD para limpiar la pantalla
+                vTaskDelay(10 / portTICK_PERIOD_MS); // tiempo que necesita el LCD para limpiar la pantalla
                 gpio_set_level(led, 1);               // Uso un ledra verificar que cambio de estado
 
                 lcd_gotoxy(1, 1);
                 lcd_print("LEYENDO ADC");
             }
 
-            // printf("El valor del ADC1 es %f V\n", LecturaADC);
-
             lcd_gotoxy(1, 2);
-
             Print_Float_LCD(LecturaADC); // Imprimo los datos del ADC
         }
         else
@@ -338,13 +234,14 @@ void TareaProcesadorA(void *taskParmPtr)
                 Auxiliar1 = true;
                 Auxiliar2 = false;
                 lcdCommand(0x01);
-                vTaskDelay(100 / portTICK_PERIOD_MS); // tiempo que necesita el LCD para limpiar la pantalla
+                vTaskDelay(10 / portTICK_PERIOD_MS); // tiempo que necesita el LCD para limpiar la pantalla
                 gpio_set_level(led, 1);               // Uso un led para verificar que cambio de estado
 
                 lcd_gotoxy(1, 1);
                 lcd_print("LEYENDO GPS");
             }
-            GPS_LCD(); // Me comunico con el gps y muestro los datos en el LCD
+            rx_uart();
+            //GPS_LCD(); // Me comunico con el gps y muestro los datos en el LCD
         }
     }
 }
@@ -354,6 +251,6 @@ void TareaProcesadorB(void *taskParmPtr)
     while (true)
     {
         ESTADO = actualizarPulsador(0);
-        // printf("%i\n", ESTADO);
+        
     }
 }
