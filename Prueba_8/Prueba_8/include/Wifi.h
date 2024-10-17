@@ -33,17 +33,12 @@
 //===========================[ Definiciones ]================================
 #define  WIFI_SSID "alejocasas"
 #define  WIFI_PASS "Cartago97"
-#define NAME "SENSOR1"
-#define PROCESADORA         0
-#define PROCESADORB         1
 
 /*======================[Prototipos de funciones]============================*/
-void subir_datos_MQTT(void);
-void deshabilitar_MQTT(void);
+void Publisher_Task();
+void wifi_init(void);
 
-extern QueueHandle_t ColaADC;
-extern QueueHandle_t ColaLAT;
-extern QueueHandle_t ColaLON;
+extern QueueHandle_t ColaJSON;
 
 extern bool MQTT_CONNEECTED;
 
