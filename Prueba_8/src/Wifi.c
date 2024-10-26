@@ -300,11 +300,11 @@ void Publisher_Task(void *params){
             }
             free(json_string);    
         }
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
         else
         {
             deshabilitar_MQTT();
         }
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
         
     }
     // Liberar memoria
