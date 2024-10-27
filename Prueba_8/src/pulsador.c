@@ -11,9 +11,11 @@ estadoBoton_t estadoPulsador;
 extern SemaphoreHandle_t mux2 ;
 extern estadoMODO_t estadoModo;
 
+int64_t tiempo_inicial=0, tiempo_actual=0;
 /*======================[Prototipos de funciones]============================*/
-//void tareaPulsador( void* taskParmPtr );
-
+static void errorBoton( void );
+static void botonPresionado( void );
+static void botonLiberado(gpio_int_type_t pulsador);
 
 void inicializarBoton(gpio_int_type_t pulsador)
 {
@@ -23,7 +25,7 @@ void inicializarBoton(gpio_int_type_t pulsador)
    gpio_set_pull_mode(pulsador, GPIO_PULLDOWN_ONLY); //Habilita resistencia de PULLDOWN interna
 }
 
-void errorBoton( void ){
+static void errorBoton( void ){
    estadoPulsador = BAJO;
 }
 
@@ -40,11 +42,11 @@ void actualizarBoton( gpio_int_type_t pulsador ){
          }
       break;
 
-      case ASCENDENTE:      
+      case ASCENDENTE:
+         tiempo_inicial = esp_timer_get_time() / 1000;
          if( contAscendente >= T_ESPERA ){
             if( gpio_get_level(pulsador) ){
                estadoPulsador = ALTO;
-               botonPresionado();
             } else{
                estadoPulsador = BAJO;
             }
@@ -57,13 +59,15 @@ void actualizarBoton( gpio_int_type_t pulsador ){
          if( !gpio_get_level(pulsador) ){
             estadoPulsador = DESCENDENTE;
          }
+         botonPresionado();
       break;
 
-      case DESCENDENTE:      
+      case DESCENDENTE:
+         //tiempo_actual=0;creo que no hace falta
          if( contDescendente >= T_ESPERA ){
             if( !gpio_get_level(pulsador) ){
                estadoPulsador = BAJO;
-               botonLiberado();
+               botonLiberado(pulsador);
             } else{
                estadoPulsador = ALTO;
             }
@@ -79,52 +83,33 @@ void actualizarBoton( gpio_int_type_t pulsador ){
    
 }
 
-void botonPresionado( void ){
-    
+static void botonPresionado( void ){
+    int64_t tiempo_actual = esp_timer_get_time() / 1000;
+
+   // Verificar si se cumple la condición (por ejemplo, si han pasado 3000 ms)
+   if (tiempo_actual - tiempo_inicial >= 3000){
+      if (mux2 != NULL){
+	      if (xSemaphoreTake(mux2, portMAX_DELAY) == pdTRUE){
+            MODO_WIFI = !MODO_WIFI;
+         }
+      }
+      xSemaphoreGive(mux2);
+   }
 }
 
-void botonLiberado(void){
+static void botonLiberado(gpio_int_type_t pulsador){
+   printf("botonLiberado\n");
+   //Utilizo semaforo para poder guardar la variable en caso de que otra
+   //tarea se encuentre consultandola 
    if (mux2 != NULL){
 		if (xSemaphoreTake(mux2, portMAX_DELAY) == pdTRUE){
 			estadoModo = estadoModo + 1;
-			if (estadoModo == 5){
+
+			if (estadoModo == 4){
 				estadoModo = 0;
 			}
-
-         switch(estadoModo){
-            case MENU_PRINCIPAL:
-               BorrarPantalla();
-               //lcd_print("Hola Nicole");
-               printf("cambio modo MENU PRINCIPAL\n");
-            break;
-            case CONECTAR_GPS:
-               printf("cambio modo GPS\n");
-            break;
-            case MEDIR_POTENCIA:
-               printf("cambio modo ADC\n");
-            break;
-            case GUARDAR_DATOS:
-               printf("cambio modo SAVE DATA\n");
-            break;
-            case CONECTAR_WIFI:
-               printf("cambio modo WIFI\n");
-            break;
-
-         }
-         //printf("cambio modo");
 		}
 	}
 	xSemaphoreGive(mux2);
-   //actualizarModo();
    
 }
-
-// void tareaPulsador(void *parametros )
-// {
-//    gpio_int_type_t parametro = *((int*)parametros); // Convertir el puntero a int
-//    while (true)
-//    {
-//       actualizarBoton(parametro);
-//       vTaskDelay(50 / portTICK_PERIOD_MS);
-//    }
-// }

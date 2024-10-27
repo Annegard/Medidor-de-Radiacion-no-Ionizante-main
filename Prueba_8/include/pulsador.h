@@ -21,6 +21,7 @@
 //#include "../include/I2C.h"
 
 #include <driver/gpio.h>
+#include "esp_timer.h"
 
 //=========================== Definiciones ================================
 typedef enum{
@@ -31,22 +32,33 @@ typedef enum{
 } estadoBoton_t;
 
 typedef enum{
-   MENU_PRINCIPAL,
-   CONECTAR_GPS,
-   MEDIR_POTENCIA,
-   CONECTAR_WIFI,
-   GUARDAR_DATOS
-   
+   LATITUD,
+   LONGITUD,
+   POTENCIA,
+   VOLTAJE,
+   SDCARD,
+   WIFI,
+   DIA,
+   HORA,
+   CONTADOR_1,
+   CONTADOR_2
+} displayMODO_t;
+
+typedef enum{
+   GPS,
+   POT,
+   DATA,
+   FECHA
 } estadoMODO_t;
 
 /*==================[Prototipos de funciones]======================*/
-void errorBoton( void );
-void inicializarBoton(gpio_int_type_t pulsador);
+
 void actualizarBoton( gpio_int_type_t pulsador );
-void botonPresionado( void );
-void botonLiberado( void );
+void inicializarBoton(gpio_int_type_t pulsador);
 
 //esp_err_t init_isr(void);
 //void isr_handler(void *arg1);
+
+extern bool MODO_WIFI;
 
 #endif

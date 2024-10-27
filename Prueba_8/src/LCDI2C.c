@@ -1,20 +1,128 @@
-/*==================[ Inclusiones ]============================================*/
 #include "../include/LCDI2C.h"
 
+uint16_t Mil, Centena, Decena, Unidad, Decima, Centesima, milesima, diezmilesima, millonesima, diezmillonesima;
+portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED; //Inicializa el spinlock desbloqueado
 
-/*==================[Prototipos de funciones]======================*/
+static uint8_t Send_i2c(uint8_t dato, int8_t direccion);
+// static uint8_t Send_array_i2c(uint8_t arreglo[], uint8_t num_caracteres, int8_t direccion);
+// static void Read_i2c(uint8_t *variable, int8_t direccion);
+static esp_err_t i2c_master_init(void);
+static void lcdCommand(unsigned char cmnd);
+static void lcdData(unsigned char data);
 
+void I2C_init(){
+    ESP_ERROR_CHECK(i2c_master_init());// Inicializo el i2c
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+}
 
-/*==================[Implementaciones]=================================*/
+#define retardo 1
 
-/*========================================================================
-Funcion: lcdCommand
-Descripcion: Envia al LCD I2C un comando de configuracion
-Parametro de entrada:
-       unsigned char cmnd: Valor en binario del comando a configurar
-No retorna nada
-========================================================================*/
-void lcdCommand(unsigned char cmnd){
+static uint8_t Send_i2c(uint8_t dato, int8_t direccion){
+
+    int ret; //Variable para saber si se realizo la comunicacion
+    i2c_cmd_handle_t cmd = i2c_cmd_link_create(); //Crea una estructura para almacenar los siguientes valores
+
+    ret = i2c_master_start(cmd); //Inicia la comunicacion (Bit de start)
+    if (ret != ESP_OK) {
+        printf("a");
+    }
+    vTaskDelay(retardo / portTICK_PERIOD_MS);
+
+    ret= i2c_master_write_byte(cmd, (direccion << 1) | WRITE_BIT, ACK_CHECK_EN); //Primero envia la direccion del esclavo al cual se desea comunicar y activa el chequeo de ack
+    if (ret != ESP_OK) {
+        printf("b");
+    }
+    vTaskDelay(retardo / portTICK_PERIOD_MS);
+
+    ret = i2c_master_write(cmd, &dato, sizeof(dato), ACK_CHECK_EN); //Segundo se envia el dato y activa el chequeo de ack
+    if (ret != ESP_OK) {
+        printf("c");
+    }
+    vTaskDelay(retardo / portTICK_PERIOD_MS);
+
+    ret = i2c_master_stop(cmd); //Detiene la comunicacion (Bit de stop)
+    if (ret != ESP_OK) {
+        printf("d");
+    }
+    vTaskDelay(retardo / portTICK_PERIOD_MS);
+
+    ret = i2c_master_cmd_begin(I2C_MASTER_NUM, cmd, 1000 / portTICK_PERIOD_MS); //Envia toda la estructura con todo lo anterior por los pines establecido de i2c del micro
+    if (ret != ESP_OK) {
+        printf("e\n");
+        // ESP_LOGE(TAG, "Error al instalar el driver I2C: %s", esp_err_to_name(ret));
+    }
+    vTaskDelay(retardo / portTICK_PERIOD_MS);
+
+    i2c_cmd_link_delete(cmd);//Elimina la estructura
+
+    if (ret == ESP_OK) { //Si el retorno de la funcion de envio es correcto
+        // printf("TODO OK\n");
+        return 1; //La funcion retorna 1
+    }else{ //Sino
+        // printf("Error I2C : %s!\n", esp_err_to_name(ret));//Imprime el error por monitor serial
+        printf("TODO MAL\n");
+        return 0; //La funcion retorna 0
+        
+    }                     
+}
+
+// static uint8_t Send_array_i2c(uint8_t arreglo[], uint8_t num_caracteres, int8_t direccion){
+ 
+//     int ret;//Variable para saber si se realizo la comunicacion
+//     i2c_cmd_handle_t cmd = i2c_cmd_link_create();//Crea una estructura para almacenar los siguientes valores
+//     i2c_master_start(cmd);//Inicia la comunicacion (Bit de start)
+//     i2c_master_write_byte(cmd, (direccion << 1) | WRITE_BIT, ACK_CHECK_EN); //Primero envia la direccion del esclavo al cual se desea comunicar y activa el chequeo de ack
+    
+//     for(uint8_t i=0; i<=num_caracteres; i++) //Recorre el arreglo para enviar de a un dato a la vez
+// 	{
+//         i2c_master_write(cmd, &arreglo[i], sizeof(arreglo[i]), ACK_CHECK_EN); //Se envian todos los datos del arreglo y activa el chequeo de ack en cada envio
+// 	}
+//     i2c_master_stop(cmd); //Detiene la comunicacion (Bit de stop)
+//     ret = i2c_master_cmd_begin(I2C_MASTER_NUM, cmd, 1000 / portTICK_PERIOD_MS);//Envia toda la estructura con todo lo anterior por los pines establecido de i2c del micro. Establece un tiempo limite para no clavar el micro si no se recibe nada
+//     i2c_cmd_link_delete(cmd); //Elimina la estructura
+
+//     if (ret == ESP_OK) { //Si el retorno de la funcion de envio es correcto
+//         return 1; //La funcion retorna 1
+//     }else{ //Sino
+//         return 0; //La funcion retorna 0
+//         printf("Error I2C : %s!\n", esp_err_to_name(ret)); //Imprime el error por monitor serial
+//      } 
+                       
+// }
+
+// static void Read_i2c(uint8_t *variable, int8_t direccion){
+//     i2c_cmd_handle_t cmd = i2c_cmd_link_create(); //Crea una estructura para almacenar los siguientes valores
+//     i2c_master_start(cmd); //Inicia la comunicacion (Bit de start)
+//     i2c_master_write_byte(cmd, (direccion << 1) | READ_BIT, ACK_CHECK_EN); //Primero envia la direccion del esclavo al cual se desea comunicar y activa el chequeo de ack
+//     //i2c_master_read(cmd, variable, 1-1, ACK_VAL); //Lee el puerto i2c para guardarlo en la varible del puntero
+//     i2c_master_read_byte(cmd, variable, NACK_VAL); //Lee el puerto i2c para guardarlo en la varible del puntero
+//     i2c_master_stop(cmd); //Detiene la comunicacion (Bit de stop)
+//     i2c_master_cmd_begin(I2C_MASTER_NUM, cmd, 1000 / portTICK_PERIOD_MS); //Envia toda la estructura con todo lo anterior por los pines establecido de i2c del micro
+//     i2c_cmd_link_delete(cmd); //Elimina la estructura
+// }
+
+static esp_err_t i2c_master_init(void)
+{
+    int i2c_master_port = I2C_MASTER_NUM;       //Puerto I2C a utilizar - 0 o 1
+    i2c_config_t conf = {
+        .mode = I2C_MODE_MASTER,                //Modo maestro
+        .sda_io_num = I2C_MASTER_SDA_IO,        //Pin SDA
+        .sda_pullup_en = GPIO_PULLUP_ENABLE,    //Habilita pull up en SDA
+        .scl_io_num = I2C_MASTER_SCL_IO,        //Pin SCL
+        .scl_pullup_en = GPIO_PULLUP_ENABLE,    //Habilita pull up en SCL
+        .master.clk_speed = I2C_MASTER_FREQ_HZ, //Frecuencia de clock
+        //.clk_flags = 0,  /*!< Optional, you can use I2C_SCLK_SRC_FLAG_* flags to choose i2c source clock here. */
+    };
+    //Establece la configuración con los datos previamente cargados
+    esp_err_t err = i2c_param_config(i2c_master_port, &conf);
+    if (err != ESP_OK) {
+        return err;
+    }
+    //si no hay error, instala el driver sin buffers porque es maestro y devuelve el valor de error correspondiente
+    return i2c_driver_install(i2c_master_port, conf.mode, I2C_MASTER_RX_BUF_DISABLE, I2C_MASTER_TX_BUF_DISABLE, 0);
+}
+
+static void lcdCommand(unsigned char cmnd){
     //El modulo (pcf8574) que convierte el lcd en I2C no es mas que un multiplexor
     //Este modulo recibe 8 bits por i2c los cuales se visualizan en los 8 pines de conexion que posee
     //Estos pines estan conectados fisicamente con el display 16x2 de la siguiente manera:
@@ -53,14 +161,7 @@ void lcdCommand(unsigned char cmnd){
 
 }
 
-/*========================================================================
-Funcion: lcdData
-Descripcion: Envia al LCD I2C un dato para imprimir un caracter
-Parametro de entrada:
-       unsigned char cmnd: Valor en binario del caracter a imprimir
-No retorna nada
-========================================================================*/
-void lcdData(unsigned char data)
+static void lcdData(unsigned char data)
 {
     //Funciona de la misma forma que LcdComand pero en este caso, RS=1 siempre ya que lo que se envia es un dato para imprimir
     //Envio los primeros 4 bits superiores de dato data
@@ -83,32 +184,22 @@ void lcdData(unsigned char data)
     vTaskDelay(1 / portTICK_PERIOD_MS);              //espero para que se valide
 }
 
-/*========================================================================
-Funcion: LCDI2C_init
-Descripcion: Inicializa y configura el LCD 
-No retorna nada
-========================================================================*/
-void LCDI2C_init(){
-    
-    Send_i2c(0xFF, ESP_SLAVE_ADDR_LCD); //Limpio la salida de P0 a P7 produciendo el apagado de enable
-	vTaskDelay(30 / portTICK_PERIOD_MS);  // Espera para iniciar
-    lcdCommand(0x02); //Psociona el puntero en 1,1 (HOME)
+void LCDI2C_init(){ 
+    Send_i2c(0xFF, ESP_SLAVE_ADDR_LCD); //Limpio la salida de P0 a P7 produciendo el apagado de enable   
+	vTaskDelay(50 / portTICK_PERIOD_MS);  // Espera para iniciar
+    lcdCommand(0x02); //Posiciona el puntero en 1,1 (HOME)
+    vTaskDelay(50 / portTICK_PERIOD_MS);  // Espera para iniciar
     lcdCommand(0x28); //Inicia. LCD 2 lineas, 5x7 matriz, modo 4 bits
-	lcdCommand(0x0C); //Enciende display
+	vTaskDelay(50 / portTICK_PERIOD_MS);  // Espera para iniciar
+    lcdCommand(0x0C); //Enciende display
+    vTaskDelay(50 / portTICK_PERIOD_MS);  // Espera para iniciar
     //lcdCommand(0x0E); //Cursor on
     lcdCommand(0x01); //Limpia LCD
-	vTaskDelay(2 / portTICK_PERIOD_MS); //Espera
+	vTaskDelay(50 / portTICK_PERIOD_MS); //Espera
 	lcdCommand(0x06); //Mueve el cursor a la derecha
+    vTaskDelay(50 / portTICK_PERIOD_MS);
 }
 
-/*========================================================================
-Funcion: lcd_gotoxy
-Descripcion: Posiciona el cursor en la posicion indicada
-Parametro de entrada:
-        unsigned char x: Posicion en x donde se desea colocar el cursor
-        unsigned char y: Posicion en y donde se desea colocar el cursor
-No retorna nada
-========================================================================*/
 void lcd_gotoxy(unsigned char x, unsigned char y)
 {
 	unsigned char firstCharAdr[] ={ 0x80,0xC0,0x94,0xD4} ;//Comandos para poscicionarse Tabla 12-5
@@ -116,13 +207,6 @@ void lcd_gotoxy(unsigned char x, unsigned char y)
 	vTaskDelay(2 / portTICK_PERIOD_MS);
 }
 
-/*========================================================================
-Funcion: lcd_print
-Descripcion: Funcion para imprimir cadena de caracteres en el lcd
-Parametro de entrada:
-        char * str: recibe el puntero del string a imprimir
-No retorna nada
-========================================================================*/
 void lcd_print( char * str )
 {
 	unsigned char i = 0;
@@ -134,15 +218,6 @@ void lcd_print( char * str )
 	}
 }
 
-//declaro variables globales para trabajar con ellas siempre
-uint16_t Mil, Centena, Decena, Unidad, Decima, Centesima, milesima, diezmilesima, millonesima, diezmillonesima;
-
-/*	Funcion que recibe un numero flotante, desplaza la coma de la 
-	variable de tipo flotante y guarda cada unidad En forma de 
-	enteros y despues los imprime
-	
-	esta funcion solo guarda las decenas, unidades, decimales y
-	centesimas*/
 void Print_Float_LCD(float Flotante, int decimas)
 {
 

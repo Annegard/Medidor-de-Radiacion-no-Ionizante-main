@@ -23,8 +23,9 @@
     #define PROCESADORA         0
     #define PROCESADORB         1
 
-    void init_Uart0(void);
-    void init_Uart2(void);
-    esp_err_t CrearTareaGPS_UART(void);
+    extern SemaphoreHandle_t Semaforo_GPS;
+    
+    void init_Uart2();//9600 baudios a GPS
+    void rx_task();
 
 #endif

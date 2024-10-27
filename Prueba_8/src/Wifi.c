@@ -1,6 +1,7 @@
 /*===========================[ Inclusiones ]================================*/
 #include "../include/Wifi.h"
 #include "../include/pulsador.h"
+#include "../include/SDCARD_SPI.h"
 /*               Notas sobre la programacion del WIFI
  *
  *  El modelo de programación WiFi se puede representar como la siguiente imagen:
@@ -48,9 +49,6 @@
 
 //===========================[ Definiciones ]================================
 #define MAX_RETRY 10
-
-#define TAG "MQTT_JSON"
-
 
 uint8_t retry_cnt = 0;
 
@@ -256,93 +254,23 @@ static void mqtt_app_start()
     esp_mqtt_client_start(client);
 }
 
+char *JSON;
 
-void Publisher_Task(void *params){
-    float LAT=0;
-    float LON=0;
-    float ADC=0;
+void Publisher_Task(){
 
-    // Crear un objeto JSON
-    cJSON *root = cJSON_CreateObject();
-    while (true)
-    {
-        if(estadoModo == CONECTAR_WIFI){
-            
-            cJSON_AddStringToObject(root, "name", NAME);//añado nombre al dispositivo emisor
+    if(xQueueReceive(ColaJSON,JSON,pdMS_TO_TICKS(100))){
 
-            if(xQueueReceive(ColaLAT,&LAT,pdMS_TO_TICKS(100))){
-                //printf("Dato recibido: %f\n", LAT);
-                cJSON_AddNumberToObject(root, "latitud", LAT);
-            }
-            if(xQueueReceive(ColaLON,&LON,pdMS_TO_TICKS(100))){
-                //printf("Dato recibido: %f\n", LON);
-                cJSON_AddNumberToObject(root, "longitud", LON);
-            }
-            if(xQueueReceive(ColaADC,&ADC,pdMS_TO_TICKS(100))){
-                //printf("Dato recibido: %f\n", ADC);
-                cJSON_AddNumberToObject(root, "potencia", ADC);
-            }
+        //Si consigue conectarse al broker habilita la tarea para publicar datos
+        if(MQTT_CONNEECTED){
+            ESP_LOGI("tarea MQTT", "Conectado, Enviando mensaje\n");
+                    
+            // Publicar la cadena JSON a través del cliente MQTT
 
-            // // Convertir el objeto JSON a una cadena JSON
-            char *json_string = cJSON_Print(root);
-
-            //Si consigue conectarse al broker habilita la tarea para publicar datos
-            if(MQTT_CONNEECTED){
-
-                ESP_LOGI("tarea MQTT", "Conectado, Enviando mensaje\n");
-                
-                // Publicar la cadena JSON a través del cliente MQTT
-                esp_mqtt_client_publish(client, "inTopic", json_string, strlen(json_string), 0, 0);
-            }
-            else{
-                ESP_LOGI("tarea MQTT", "Sin conectar\n");
-
-            }
-            free(json_string);    
+            //esp_mqtt_client_publish(esp_mqtt_client_handle_t client ,const char *topic ,const char *data ,int len             ,int qos ,int retain);
+              esp_mqtt_client_publish(client                          ,"inTopic"         ,JSON      ,strlen(JSON) ,0       ,0         );
         }
-        else
-        {
-            deshabilitar_MQTT();
+        else{
+            ESP_LOGI("tarea MQTT", "Sin conectar\n");
         }
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-        
     }
-    // Liberar memoria
-    cJSON_Delete(root);
-    
-}
-
-TaskHandle_t xHandle;
-
-void subir_datos_MQTT(void)
-{
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
-    {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(ret);
-
-    wifi_init();
-
-    BaseType_t res4 = xTaskCreatePinnedToCore(
-            Publisher_Task,                     	// Funcion de la tarea a ejecutar
-            "Publisher_Task",   	                // Nombre de la tarea como String amigable para el usuario
-            configMINIMAL_STACK_SIZE*6, 		// Cantidad de stack de la tarea
-            NULL,                          	    // Parametros de tarea
-            tskIDLE_PRIORITY+1,         	    // Prioridad de la tarea -> Queremos que este un nivel encima de IDLE
-            &xHandle,                          		// Puntero a la tarea creada en el sistema
-            PROCESADORB                         // Procesador donde se ejecuta
-        );
-        
-    if(res4 == pdFAIL){
-        printf( "Error al crear la tarea.\r\n" );
-        while(true);					// si no pudo crear la tarea queda en un bucle infinito
-    }
-}
-
-void deshabilitar_MQTT(void){
-    esp_wifi_deinit();
-    vTaskDelete(xHandle);
 }
