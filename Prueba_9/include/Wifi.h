@@ -20,9 +20,15 @@
 
     #include "mqtt_client.h"
 
+    typedef struct{
+        uint16_t num_networks;
+        wifi_ap_record_t ap_records[20]; 
+    } redesWIFI_t;
+
     //======================Prototipos de funciones============================
     void Publisher_Task();
-    void wifi_init(void);
+    void wifi_init(char ssid_string[MAX_SSID_LEN],char password[MAX_PASSWORD_LEN]);
     void mqtt_app_stop();
+    redesWIFI_t wifi_scan_task(void);
 
     #endif

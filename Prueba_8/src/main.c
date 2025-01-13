@@ -10,103 +10,82 @@
  * Proyecto Para la depuracion de distintas etapas de reversiones anteriores de codigo
  */
 
-#include "driver/gpio.h"    //pines generales
-#include "esp_adc/adc_oneshot.h"     //ADC
-
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"  //Libreria Tareas
-#include "freertos/semphr.h"//Libreria Semaforo
-#include "esp_log.h"
-
+//============================= Inclusiones ================================
 // librerias propias
+#include "../include/Global.h"
 #include "../include/LCDI2C.h"
 #include "../include/pulsador.h"
 #include "../include/GPS_UART.h"
 #include "../include/Wifi.h"
 #include "../include/SDCARD_SPI.h"
 
-// //=========================== Variables y Definiciones ================================
+// //=========================== Definiciones ================================
 // DEFINICIONES
-#define T 10 / portTICK_PERIOD_MS // tiempo en ms de espera para volver a ingresar a la función de actualizar semaforo
-#define PROCESADORA         0
-
-#define PROCESADORB         1
-
-#define PRIORIDAD_LCD       4
-#define PRIORIDAD_ADC       3
-#define PRIORIDAD_GPS       2
-#define PRIORIDAD_PULSADOR  1
-#define PRIORIDAD_SD        0
-
+//#define T 10 / portTICK_PERIOD_MS // tiempo en ms de espera para volver a ingresar a la función de actualizar semaforo
 #define Promedio 10
-
-#define BOTON_A GPIO_NUM_36
-// #define BOTON_B GPIO_NUM_26
-
 #define DATA_QUEUE_SIZE 10
 
-SemaphoreHandle_t Semaforo_Boton = NULL;
-SemaphoreHandle_t Semaforo_ADC = NULL;
-SemaphoreHandle_t Semaforo_GPS = NULL;
-
-displayMODO_t displayModo;
-estadoMODO_t estadoModo;
-
-uint8_t Auxiliar=0;
-
-float voltaje_promedio = 0;
-float valor_dB = 0;
-
-float Latitud = 0;
-float Longitud = 0;
-uint8_t Hora =0;
-uint8_t Minuto=0;
-uint8_t Segundos=0;
-uint8_t Dia=0;
-uint8_t Mes=0;
+// //=========================== Variables ================================
+uint64_t total;
+uint64_t libre;
 
 static int64_t tiempo_actual = 0;
 static int64_t tiempo_inicial = 0;   
 
+bool MQTT_CONNEECTED = false;
+bool SD_CONECTADA = false;
+bool ESPACIO_EN_SD = false;
+bool MODO_WIFI = false;
+bool ESTADO_WIFI = false;
+
+//====================== Prototipos de funciones ============================
 esp_err_t CrearTareaADC(void);
 esp_err_t CrearTareaPulsador(gpio_int_type_t pulsador);
 esp_err_t CrearTareaSD_SPI();
 esp_err_t CrearTareaLCD(void);
 esp_err_t CrearTareaGPS_UART(void);
 esp_err_t CrearTareaWIFI_MQTT(int refrezco);
+esp_err_t CrearTareaColas();
 
 static void BorrarTareaWIFI_MQTT();
-static void tarea_adc(void *taskParmPtr);
+static void tarea_ADC(void *taskParmPtr);
 static void tarea_Pulsador(void *taskParmPtr);
 static void tarea_LCD();
 static void tarea_WIFI(void* parametros);
-static void actualizardisplay(int displayModo, int fila);
+static void actualizardisplay(displayMODO_t displayModo, int fila, Datos Datos);
+static void TareaColas();
 
+uint8_t ActualizarLCDporTiempo(estadoMODO_t estadoModoLCD);
+
+//============================= Colas ============================
 QueueHandle_t ColaADC;
 QueueHandle_t ColaGPS;
+QueueHandle_t ColaDatos;
+QueueHandle_t ColaPulsador;
 
+//============================= Semaforos ============================
+SemaphoreHandle_t Semaforo_MQTT;
+SemaphoreHandle_t Semaforo_MODO_WIFI;
+SemaphoreHandle_t Semaforo_ESTADO_WIFI;
+SemaphoreHandle_t Semaforo_SD_Conectada;
+SemaphoreHandle_t Semaforo_SD_Espacio;
+
+//============================= Punteros ============================
 TaskHandle_t punteroTareaWIFI;
-
-bool MQTT_CONNEECTED = false;
-bool SD_CONECTADA = false;
-bool ESPACIO_EN_SD = false;
-bool MODO_WIFI = false;
 
 // //=========================== Función principal ================================
 void app_main()
 {
-    
-    ColaGPS = xQueueCreate(DATA_QUEUE_SIZE, sizeof(GPSData));
-    ColaADC = xQueueCreate(DATA_QUEUE_SIZE, sizeof(ADCData));
-    
-    Semaforo_Boton = xSemaphoreCreateMutex();
-    Semaforo_ADC = xSemaphoreCreateMutex();
-    Semaforo_GPS = xSemaphoreCreateMutex();
+    ColaGPS = xQueueCreate(DATA_QUEUE_SIZE, sizeof(Datos));
+    ColaADC = xQueueCreate(DATA_QUEUE_SIZE, sizeof(Datos));
+    ColaDatos = xQueueCreate(DATA_QUEUE_SIZE, sizeof(Datos));
+    ColaPulsador = xQueueCreate(DATA_QUEUE_SIZE, sizeof(estadoMODO_t));
 
-    estadoModo=POT-1;//Inicializo la variable estadoModo
-    Auxiliar = estadoModo;//cargo en la variable auxiliar el estadoModo para el pulsador
-
-    vTaskDelay(2000 / portTICK_PERIOD_MS);
+    Semaforo_MQTT = xSemaphoreCreateMutex();
+    Semaforo_ESTADO_WIFI = xSemaphoreCreateMutex();
+    Semaforo_MODO_WIFI = xSemaphoreCreateMutex();
+    Semaforo_SD_Conectada = xSemaphoreCreateMutex();
+    Semaforo_SD_Espacio = xSemaphoreCreateMutex();
 
     //Creo Tareas en el procesador B
     CrearTareaLCD();
@@ -116,7 +95,28 @@ void app_main()
     CrearTareaSD_SPI();//Recibe de parametro cada cuantos segundos guarda los datos
 
     //Creo Tareas en el procesador A
-    // CrearTareaWIFI_MQTT(1);//Recibe de parametro cada cuantos segundos guarda los datos
+    CrearTareaWIFI_MQTT(1);//Recibe de parametro cada cuantos segundos guarda los datos
+
+}
+
+esp_err_t CrearTareaColas(){
+        BaseType_t res = xTaskCreatePinnedToCore(
+        TareaColas,                    // Funcion de la tarea a ejecutar
+        "TareaColas",                   // Nombre de la tarea como String amigable para el usuario
+        configMINIMAL_STACK_SIZE*1, // Cantidad de stack de la tarea
+        NULL,                         // Parametros de tarea
+        tskIDLE_PRIORITY+PRIORIDAD_COLAS,         // Prioridad de la tarea -> Queremos que este un nivel encima de IDLE
+        NULL,                         // Puntero a la tarea creada en el sistema
+        PROCESADORB                   // Procesador donde se ejecuta
+    );
+    // Gestion de errores
+    if (res == pdFAIL)
+    {
+        printf("Error al crear la tarea Colas.\r\n");
+        while (true)
+            ; // si no pudo crear la tarea queda en un bucle infinito
+    }
+    return ESP_OK;
 }
 
 esp_err_t CrearTareaLCD(){
@@ -133,7 +133,7 @@ esp_err_t CrearTareaLCD(){
     // Gestion de errores
     if (res == pdFAIL)
     {
-        printf("Error al crear la tarea ADC.\r\n");
+        printf("Error al crear la tarea LCD.\r\n");
         while (true)
             ; // si no pudo crear la tarea queda en un bucle infinito
     }
@@ -164,7 +164,7 @@ esp_err_t CrearTareaPulsador(gpio_int_type_t pulsador){
 esp_err_t CrearTareaADC(void){
     /////TAREA ADC////
     BaseType_t res = xTaskCreatePinnedToCore(
-        tarea_adc,                    // Funcion de la tarea a ejecutar
+        tarea_ADC,                    // Funcion de la tarea a ejecutar
         "tareaadc",                   // Nombre de la tarea como String amigable para el usuario
         configMINIMAL_STACK_SIZE * 3, // Cantidad de stack de la tarea
         NULL,                         // Parametros de tarea
@@ -189,7 +189,7 @@ esp_err_t CrearTareaSD_SPI(){
     // función que devuelve void y toma un puntero void como único parámetro. Todas las
     // funciones que implementan una tarea deben ser de este tipo."
 
-    configurarSDCARD();
+    inicializarSDCARD();
 
     vTaskDelay(pdMS_TO_TICKS(1000));
 
@@ -252,8 +252,17 @@ esp_err_t CrearTareaWIFI_MQTT(int refrezco){
 }
 
 static void BorrarTareaWIFI_MQTT(){
-    esp_wifi_deinit();
+
     vTaskDelete(punteroTareaWIFI);
+
+    ESP_LOGI("WIFI", "Deteniendo el Wi-Fi...");
+    
+    mqtt_app_stop();
+
+    ESP_ERROR_CHECK(esp_wifi_stop());
+    ESP_ERROR_CHECK(esp_wifi_deinit());
+
+    ESP_LOGI("WIFI", "Wi-Fi deshabilitado");
 }
 
 static void tarea_Pulsador(void* parametros){
@@ -268,19 +277,6 @@ static void tarea_Pulsador(void* parametros){
         //Lee el pulsador, si este detecta una pulsación cambio el estado de "estadoModo"
         actualizarBoton(boton);
 
-        //Si "estadoModo" cambio, utiliza semaforo para poder guardar la variable en caso
-        //De que otra tarea se encuentre consultandola
-        if(estadoModo!=Auxiliar){
-            if (Semaforo_Boton != NULL){
-		        if (xSemaphoreTake(Semaforo_Boton, portMAX_DELAY) == pdTRUE){
-                    printf("Estado Modo: %i \n", estadoModo);
-
-                    Auxiliar = estadoModo;
-                }
-			}
-            xSemaphoreGive(Semaforo_Boton);
-        }
-        
         vTaskDelay(10 / portTICK_PERIOD_MS);
     }
 }
@@ -320,15 +316,15 @@ static void tarea_WIFI(void* parametros){
     }
 }
 
-/** Tarea "tarea_adc":
+/** Tarea "tarea_ADC":
  *  Tarea que congifura el ADC2 del microcontrolador y ejecuta un bucle infinito donde lee constantemente
  *  el pin configurado
 */
-static void tarea_adc(void *taskParmPtr)
+static void tarea_ADC(void *taskParmPtr)
 {
     printf("TareaADC creada\n");
 
-    ADCData datosADC;
+    Datos datosADC;
 
     if (ColaADC == NULL) {
         ESP_LOGE("Cola ADC", "Error al crear la cola ADC");
@@ -340,6 +336,9 @@ static void tarea_adc(void *taskParmPtr)
     uint8_t contador = 0;
     float suma = 0;
     float voltaje = 0;
+
+    float voltaje_promedio = 0;
+    float valor_dB = 0;
 
     //----- SETUP ADC1 -----
 
@@ -400,37 +399,37 @@ static void tarea_adc(void *taskParmPtr)
             suma = suma + voltaje;
             contador++;
         }
+
         else if (contador == 10){
             //Cada vez que llega el contador a 10 ejecuta semaforo para actualizar
             //los valores medidos
-            if (Semaforo_ADC != NULL){
-		        if (xSemaphoreTake(Semaforo_ADC, portMAX_DELAY) == pdTRUE){
-                    voltaje_promedio = suma / 10;
-                    datosADC.VOL = voltaje_promedio;
+            voltaje_promedio = suma / 10;
+            datosADC.VOL = voltaje_promedio;
 
-                    valor_dB = ((voltaje_promedio *18.65) -50)*(-1);
-                    datosADC.POT = valor_dB;
+            valor_dB = ((voltaje_promedio *18.65) -50)*(-1);
+            datosADC.POT = valor_dB;
 
-                    // printf("midiendo ADC:  %f\n", valor_dB);
+            // printf("midiendo ADC:  %f\n", valor_dB);
 
-                    //envio los datos a la cola
-                    if (xQueueSend(ColaADC, &datosADC, portMAX_DELAY) != pdPASS) {
-                        ESP_LOGE("Cola", "Error al enviar a la cola ADC");
-                    }
-                }
+            //envio los datos a la cola
+            if (xQueueSend(ColaADC, &datosADC, portMAX_DELAY) != pdPASS) {
+                ESP_LOGE("Cola", "Error al enviar a la cola ADC");
             }
-            xSemaphoreGive(Semaforo_ADC);//libero semaforo
-
-
-            contador = 0;
-            suma = 0;
         }
+        contador = 0;
+        suma = 0;
 
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 }
 
 static void tarea_LCD(){
+
+    Datos Datos_LCD;
+    estadoMODO_t estadoModoLCD;
+
+    bool HabilitaActualizarDisplay=true;
+    bool AuxModoWIFI=false;
 
     I2C_init();
 
@@ -442,48 +441,93 @@ static void tarea_LCD(){
     vTaskDelay(5000 / portTICK_PERIOD_MS);
 
     while (true)
-    {
-        tiempo_actual = esp_timer_get_time() / 1000;
-
-        if (tiempo_actual - tiempo_inicial >= 3000){
-        	estadoModo = estadoModo + 1;
-
-			if (estadoModo == 4){
-				estadoModo = 0;
-			}
-
-            tiempo_inicial = tiempo_actual;
-        }
-
+    {   
+        //Limpio la pantalla antes de todo
         BorrarPantalla();
-        // actualizardisplay(CONTADOR_1,1);
-        // actualizardisplay(CONTADOR_2,2);
-        if(ESPACIO_EN_SD){
-            lcd_print("Memoria SD Llena");
+
+        if(xQueueReceive(ColaDatos, &Datos_LCD, portMAX_DELAY) != pdPASS) {
+            ESP_LOGE(TAG, "Error al recibir la cola Datos_LCD");
         }
-        else if (MODO_WIFI)
-        {
-            lcd_print("Modo WIFI");
-            actualizardisplay(WIFI,2);
+
+        //Actualizar estadoModoLCD por pulsador usando Colas
+        if(xQueueReceive(ColaPulsador, &estadoModoLCD, portMAX_DELAY) != pdPASS) {
+            ESP_LOGE(TAG, "Error al recibir la cola Datos_LCD");
+        }
+
+        //Actualizar estadoModoLCD por tiempo
+        estadoModoLCD=ActualizarLCDporTiempo(estadoModoLCD);
+
+        //VERIFICA CONECCION CON SD
+        if (xSemaphoreTake(Semaforo_SD_Conectada, portMAX_DELAY)) {
+            if (SD_CONECTADA){
+                HabilitaActualizarDisplay = true;
+            }
+            else{
+                HabilitaActualizarDisplay = false;
+                
+                lcd_gotoxy(1, 1);
+                lcd_print("Memoria SD");
+                lcd_gotoxy(1, 2);
+                lcd_print("desconectada");
+                vTaskDelay(pdMS_TO_TICKS(3000));
+            }
+            xSemaphoreGive(Semaforo_SD_Conectada);
+        }
+
+
+        //VERIFICA ESPACIO EN SD
+        if (xSemaphoreTake(Semaforo_SD_Espacio, portMAX_DELAY)) {
+            if (ESPACIO_EN_SD){
+                HabilitaActualizarDisplay = true;
+            }
+            else{
+                HabilitaActualizarDisplay = false;
+                
+                lcd_gotoxy(1, 1);
+                lcd_print("Memoria SD");
+                lcd_gotoxy(1, 2);
+                lcd_print("Llena");
+                vTaskDelay(pdMS_TO_TICKS(3000));
+            }
+            xSemaphoreGive(Semaforo_SD_Espacio);
+        }
+
+        //VERIFICA MODO WIFI
+        
+        if (xSemaphoreTake(Semaforo_MODO_WIFI, portMAX_DELAY)){
+            AuxModoWIFI = MODO_WIFI;
+            xSemaphoreGive(Semaforo_MODO_WIFI);
+        }//hago esto sino me quedaba un semaforo anidado bloqueando el pulsador
+
+        if (AuxModoWIFI){
+            HabilitaActualizarDisplay = false;
+            actualizardisplay(WIFI,1, Datos_LCD);
+            actualizardisplay(MQTT,2, Datos_LCD);
         }
         else{
-            switch (estadoModo)
+            HabilitaActualizarDisplay = true;
+        }
+
+        if(HabilitaActualizarDisplay){
+            // actualizardisplay(CONTADOR_1,1);
+            // actualizardisplay(CONTADOR_2,2); 
+            switch (estadoModoLCD)
             {
             case GPS:
-                actualizardisplay(LATITUD,1);
-                actualizardisplay(LONGITUD,2);
+                actualizardisplay(LATITUD,1, Datos_LCD);
+                actualizardisplay(LONGITUD,2, Datos_LCD);
                 break;
             case POT:
-                actualizardisplay(POTENCIA,1);
-                actualizardisplay(VOLTAJE,2);
+                actualizardisplay(POTENCIA,1, Datos_LCD);
+                actualizardisplay(VOLTAJE,2, Datos_LCD);
                 break;
             case DATA:
-                actualizardisplay(SDCARD,1);
-                actualizardisplay(WIFI,2);
+                actualizardisplay(SDCARD_TOTAL,1, Datos_LCD);
+                actualizardisplay(SDCARD_LIBRE,2, Datos_LCD);
                 break;
             case FECHA:
-                actualizardisplay(DIA,1);
-                actualizardisplay(HORA,2);
+                actualizardisplay(DIA,1, Datos_LCD);
+                actualizardisplay(HORA,2, Datos_LCD);
                 break;
             default:
                 break;
@@ -493,7 +537,69 @@ static void tarea_LCD(){
     }
 }
 
-static void actualizardisplay(int displayModo, int fila){
+uint8_t ActualizarLCDporTiempo(estadoMODO_t estadoModoLCD){
+    tiempo_actual = esp_timer_get_time() / 1000;
+
+    if (tiempo_actual - tiempo_inicial >= 3000){
+        estadoModoLCD = estadoModoLCD + 1;
+
+        if (estadoModoLCD == 4){
+            estadoModoLCD = 0;
+        }
+
+        tiempo_inicial = tiempo_actual;
+    }
+
+    return estadoModoLCD;
+}
+
+static void TareaColas(){
+    
+    printf("Tarea COLAS creada\n");
+
+    Datos DatosGPSRecibidos;
+    Datos DatosADCRecibidos;
+    Datos Datos_Combinados;
+
+    //Predefino
+    Datos_Combinados.MES=0;
+    Datos_Combinados.DIA=0;
+    Datos_Combinados.HORA=0;
+    Datos_Combinados.MIN=0;
+    Datos_Combinados.LAT=0;
+    Datos_Combinados.LON=0;
+    Datos_Combinados.VOL=0;
+    Datos_Combinados.POT=0;
+
+    while (true){
+
+        if(xQueueReceive(ColaGPS, &DatosGPSRecibidos, portMAX_DELAY) != pdPASS) {
+            ESP_LOGE(TAG, "Error al recibir la cola GPS");
+        }
+        else{
+            Datos_Combinados.MES=DatosGPSRecibidos.MES;
+            Datos_Combinados.DIA=DatosGPSRecibidos.DIA;
+            Datos_Combinados.HORA=DatosGPSRecibidos.HORA;
+            Datos_Combinados.MIN=DatosGPSRecibidos.MIN;
+            Datos_Combinados.LAT=DatosGPSRecibidos.LAT;
+            Datos_Combinados.LON=DatosGPSRecibidos.LON;
+        }
+        
+        if(xQueueReceive(ColaADC, &DatosADCRecibidos, portMAX_DELAY) != pdPASS) {
+            ESP_LOGE(TAG, "Error al recibir la cola ADC");
+        }
+        else{
+            Datos_Combinados.VOL=DatosADCRecibidos.VOL;
+            Datos_Combinados.POT=DatosADCRecibidos.POT;
+        }
+
+        if (xQueueSend(ColaDatos, &Datos_Combinados, portMAX_DELAY) != pdPASS) {
+            ESP_LOGE("Cola", "Error al enviar a la cola Datos");
+        }
+    }
+}
+
+static void actualizardisplay(displayMODO_t displayModo, int fila, Datos Datos){
 
     switch (displayModo)
     {
@@ -502,98 +608,107 @@ static void actualizardisplay(int displayModo, int fila){
             lcd_print("LAT: ");
             lcd_gotoxy(6, fila);
 
-            if (Semaforo_GPS != NULL){
-		        if (xSemaphoreTake(Semaforo_GPS, portMAX_DELAY) == pdTRUE){
-                    Print_Float_LCD(Latitud, 6/*Cantidad de decimas*/);
-                }
-            }
-            xSemaphoreGive(Semaforo_GPS);//libero semaforo
+            Print_Float_LCD(Datos.LAT, 6/*Cantidad de decimas*/);
 
-            break;
+        break;
 
         case LONGITUD:
             lcd_gotoxy(1, fila);
             lcd_print("LON: ");
             lcd_gotoxy(6, fila);
 
-            if (Semaforo_GPS != NULL){
-		        if (xSemaphoreTake(Semaforo_GPS, portMAX_DELAY) == pdTRUE){
-                    Print_Float_LCD(Longitud, 6/*Cantidad de decimas*/);
-                }
-            }
-            xSemaphoreGive(Semaforo_GPS);//libero semaforo
+            Print_Float_LCD(Datos.LON, 6/*Cantidad de decimas*/);
 
-            break;
+        break;
 
         case POTENCIA:
             lcd_gotoxy(1, fila);
             lcd_print("Pot:");
             lcd_gotoxy(5, fila);
 
-            if (Semaforo_ADC != NULL){
-		        if (xSemaphoreTake(Semaforo_ADC, portMAX_DELAY) == pdTRUE){
-                    Print_Float_LCD(valor_dB, 4/*Cantidad de decimas*/);
-                }
-            }
-            xSemaphoreGive(Semaforo_ADC);//libero semaforo
+            Print_Float_LCD(Datos.POT, 4/*Cantidad de decimas*/);
 
             lcd_gotoxy(14, fila);
             lcd_print("dBm");
-            break;
+        break;
 
         case VOLTAJE:
             lcd_gotoxy(1, fila);
             lcd_print("Vol:");
             lcd_gotoxy(5, fila);
         
-            if (Semaforo_ADC != NULL){
-		        if (xSemaphoreTake(Semaforo_ADC, portMAX_DELAY) == pdTRUE){
-                    Print_Float_LCD(voltaje_promedio, 4/*Cantidad de decimas*/);
-                }
-            }
-            xSemaphoreGive(Semaforo_ADC);//libero semaforo
+            Print_Float_LCD(Datos.VOL, 4/*Cantidad de decimas*/);
 
             lcd_gotoxy(14, fila);
             lcd_print("V");
-            break;
+        break;
 
-        case SDCARD:
+        case SDCARD_TOTAL:
             lcd_gotoxy(1, fila);
-            lcd_print("SD:");
-            if (SD_CONECTADA){
-                lcd_print("conect");
+            lcd_print("SD Total:");
+
+            if (xSemaphoreTake(Semaforo_SD_Espacio, portMAX_DELAY)) {
+                Print_Float_LCD(total, 7/*Cantidad de decimas*/);
+                xSemaphoreGive(Semaforo_SD_Espacio);
             }
-            else{
-                lcd_print("uncon.");
+        break;
+
+        case SDCARD_LIBRE:
+            lcd_gotoxy(1, fila);
+            lcd_print("SD Libre:");
+
+            if (xSemaphoreTake(Semaforo_SD_Espacio, portMAX_DELAY)) {
+                Print_Float_LCD(total, 7/*Cantidad de decimas*/);
+                xSemaphoreGive(Semaforo_SD_Espacio);
             }
-            break;
+        break;
 
         case WIFI:
             lcd_gotoxy(1, fila);
-            lcd_print("WIFI-MQTT:");
-            if (MQTT_CONNEECTED){
-                lcd_print("conect");
+            lcd_print("WIFI:");
+
+            if (xSemaphoreTake(Semaforo_ESTADO_WIFI, portMAX_DELAY)) {
+                if (ESTADO_WIFI){
+                    lcd_print("conect");
+                }
+                else{
+                    lcd_print("uncon.");
+                }
+                xSemaphoreGive(Semaforo_ESTADO_WIFI);
             }
-            else{
-                lcd_print("uncon.");
+        break;
+
+        case MQTT:
+            lcd_gotoxy(1, fila);
+            lcd_print("MQTT:");
+
+            if (xSemaphoreTake(Semaforo_MQTT, portMAX_DELAY)) {
+                if (MQTT_CONNEECTED){
+                    lcd_print("conect");
+                }
+                else{
+                    lcd_print("uncon.");
+                }
+                xSemaphoreGive(Semaforo_MQTT);
             }
-            break;
+
+        break;
 
         case DIA:
             lcd_gotoxy(1, fila);
-            Print_Float_LCD(Dia,0);
+            Print_Float_LCD(Datos.DIA,0);
             lcd_print("/");
-            Print_Float_LCD(Mes,0);
-            break;
+            Print_Float_LCD(Datos.MES,0);
+        break;
 
         case HORA:
             lcd_gotoxy(1, fila);
-            Print_Float_LCD(Hora,0);
+            Print_Float_LCD(Datos.HORA,0);
             lcd_print(":");
-            Print_Float_LCD(Minuto,0);
+            Print_Float_LCD(Datos.MIN,0);
             lcd_print(":");
-            Print_Float_LCD(Segundos,0);
-            break;
+            Print_Float_LCD(Datos.SEG,0);
+        break;
 
         case CONTADOR_1:
             lcd_gotoxy(1, fila);
@@ -601,16 +716,17 @@ static void actualizardisplay(int displayModo, int fila){
             contador1++;
             lcd_print("Contador 1:");
             Print_Float_LCD(contador1,0);
-            break;
+        break;
         case CONTADOR_2:
             lcd_gotoxy(1, fila);
             static uint8_t contador2 = 0; // Esta variable solo se define una vez
             contador2++;
             lcd_print("Contador 2:");
             Print_Float_LCD(contador2,0);
-            break;
+        break;
 
         default:
-            break;
+            lcd_print("Error LCD");
+        break;
     }
 }

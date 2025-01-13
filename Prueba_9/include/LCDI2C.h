@@ -28,9 +28,12 @@
     //=======================Prototipos de funciones========================
     void LCDI2C_init();
     void I2C_init();
-    void lcd_print( char * str );
+    void lcd_print( const char * str );
+    void lcd_print_int(int number);
+    void lcd_print_char(unsigned char c);
     void Print_Float_LCD(float Flotante, int decimas);
     void BorrarPantalla(void);
     void lcd_gotoxy(unsigned char x, unsigned char y);
+    void lcdData(unsigned char data);
 
 #endif

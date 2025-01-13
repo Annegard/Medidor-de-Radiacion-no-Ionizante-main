@@ -123,6 +123,14 @@ void rx_task(){
     printf("TareaGPS creada\n");
 
     Datos datosGPS;
+
+    datosGPS.LAT =  0;
+    datosGPS.LON=   0;
+    datosGPS.HORA = 0;
+    datosGPS.MIN =  0;
+    datosGPS.SEG =  0;
+    datosGPS.DIA = 0;
+    datosGPS.MES = 0;
     
     init_Uart2();//9600 baudios a GPS
     
@@ -225,15 +233,14 @@ void rx_task(){
 
             datosGPS.DIA = hgps.date;
             datosGPS.MES = hgps.month;
-
-            //Cargo a la Cola
-            xQueueSend(ColaGPS, &datosGPS, portMAX_DELAY);
         }
 
-        vTaskDelay(1000/portTICK_PERIOD_MS);
+        //Cargo a la Cola
+        // ESP_LOGE("GPS_UART", "Latitud: %f", hgps.latitude);
+        xQueueSend(ColaGPS, &datosGPS, portMAX_DELAY);
+        vTaskDelay(100/portTICK_PERIOD_MS);
     }
     free(buffertocopyinto);
     free(data);
-    
 }
 

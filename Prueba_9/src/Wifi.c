@@ -1,6 +1,5 @@
 /*===========================[ Inclusiones ]================================*/
 #include "../include/Wifi.h"
-#include "../include/pulsador.h"
 /*               Notas sobre la programacion del WIFI
  *
  *  El modelo de programación WiFi se puede representar como la siguiente imagen:
@@ -48,17 +47,13 @@
 
 //===========================[ Definiciones ]================================
 #define MAX_RETRY 10
-
-#define TAG "MQTT_JSON"
-
-
 uint8_t retry_cnt = 0;
+
+bool Auxiliar_Estado = false;
 
 //Declaro la varible cliente de forma global ya que la utilizo tambien para
 //hacer publish al broker
 esp_mqtt_client_handle_t client = NULL;
-extern estadoMODO_t estadoModo;
-extern SemaphoreHandle_t mux2 ;
 
 /*======================[Prototipos de funciones]============================*/
 
@@ -66,6 +61,8 @@ static void mqtt_app_start(void);
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
+    Auxiliar_Estado=false;
+
     switch (event_id)
     {
     case WIFI_EVENT_STA_START:
@@ -78,6 +75,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         break;
 
     case IP_EVENT_STA_GOT_IP:
+        Auxiliar_Estado=true;
         ESP_LOGI("Wifi Station:", "got ip: startibg MQTT Client\n");
         mqtt_app_start();
         //printf("mqtt start\n");
@@ -96,12 +94,17 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
     default:
         break;
     }
+
+    if (xSemaphoreTake(Semaforo_ESTADO_WIFI, portMAX_DELAY)) {
+        ESTADO_WIFI=Auxiliar_Estado;
+    }
+    xSemaphoreGive(Semaforo_ESTADO_WIFI);
 }
 
 //Configuracion y arranque del modulo WIFI
-void wifi_init(void)
+void wifi_init(char ssid_string[MAX_SSID_LEN],char password[MAX_PASSWORD_LEN])
 {
-    /*======================[Paso 1: Inicializacion del WIFI]============================*/
+    /*======================[Paso 1: Inicializacion del WIFI]===========================k=*/
 
     //Inicializar la pila TCP/IP
     ESP_ERROR_CHECK(esp_netif_init());
@@ -112,7 +115,7 @@ void wifi_init(void)
     //Carga la WIFI_STA por defecto. En caso de cualquier error de inicio, esta API se cancela.
     esp_netif_create_default_wifi_sta();
 
-    //Cargo la configuracion de Wifi por default
+    // Cargo la configuracion de Wifi por default
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
 
     // INICIALIZAR WIFI
@@ -155,13 +158,18 @@ void wifi_init(void)
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL));
 
     //cargo el modo, id y contraseña del wifi al que se va a conectar el ESP
-    wifi_config_t wifi_config = {
-        .sta = {
-            .ssid = WIFI_SSID,
-            .password = WIFI_PASS,
-	     .threshold.authmode = WIFI_AUTH_WPA2_PSK,//creo que esto era para la seguridad del wifi
-        },
-    };
+    wifi_config_t wifi_config = {0};//inicializo la estructura vacia
+
+    // Copiar la SSID al arreglo wifi_config.sta.ssid
+    strncpy((char *)wifi_config.sta.ssid, ssid_string, sizeof(wifi_config.sta.ssid) - 1);
+    wifi_config.sta.ssid[sizeof(wifi_config.sta.ssid) - 1] = '\0'; // Asegura terminación nula
+
+    // Copiar la contraseña al arreglo wifi_config.sta.password
+    strncpy((char *)wifi_config.sta.password, password, sizeof(wifi_config.sta.password) - 1);
+    wifi_config.sta.password[sizeof(wifi_config.sta.password) - 1] = '\0'; // Asegura terminación nula
+
+    ESP_LOGI("WIFI_TAG", "Configuración WiFi - SSID: %s, Password: %s", wifi_config.sta.ssid, wifi_config.sta.password);
+
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA) );
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
 
@@ -172,7 +180,6 @@ void wifi_init(void)
     //En este caso me conecto dentro del wifi_event_handler cuando arranca el modulo 
     //y cada vez que este desconectado
 }
-
 
 /**
  * @brief Event handler registered to receive MQTT events
@@ -195,12 +202,12 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     {
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI("MQTT event handler", "MQTT_EVENT_CONNECTED");
-        if (mux2 != NULL){
-		    if (xSemaphoreTake(mux2, pdMS_TO_TICKS(100)) == pdTRUE){
+        if (Semaforo_MQTT != NULL){
+		    if (xSemaphoreTake(Semaforo_MQTT, pdMS_TO_TICKS(100)) == pdTRUE){
                 MQTT_CONNEECTED=true;//Si consigue conectarse al broker habilita la tarea para publicar datos
             }
         }
-        xSemaphoreGive(mux2);
+        xSemaphoreGive(Semaforo_MQTT);
         //MQTT_CONNEECTED=true;   
         msg_id = esp_mqtt_client_subscribe(client, "Mensaje", 0);
         if(msg_id<0){printf("Falla al publicar");}
@@ -209,12 +216,12 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
     case MQTT_EVENT_DISCONNECTED:
         ESP_LOGI("MQTT event handler", "MQTT_EVENT_DISCONNECTED");
-        if (mux2 != NULL){
-		    if (xSemaphoreTake(mux2, pdMS_TO_TICKS(100)) == pdTRUE){
+        if (Semaforo_MQTT != NULL){
+		    if (xSemaphoreTake(Semaforo_MQTT, pdMS_TO_TICKS(100)) == pdTRUE){
                 MQTT_CONNEECTED=false;//Si consigue conectarse al broker habilita la tarea para publicar datos
             }
         }
-        xSemaphoreGive(mux2);
+        xSemaphoreGive(Semaforo_MQTT);
         //MQTT_CONNEECTED=false;
         break;
     case MQTT_EVENT_SUBSCRIBED:
@@ -240,110 +247,110 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     }
 }
 
-
 static void mqtt_app_start()
 {
     printf("STARTING MQTT");
 
+
     esp_mqtt_client_config_t mqttConfig = {
-        .broker.address.uri = "mqtt://broker.emqx.io",
-        .broker.address.port = 1883
+        .broker.address.uri = MQTT_URI,
+        .broker.address.port = MQTT_PORT
     };
-    
+
     //Inicializa el driver para los eventos MQTT
     client = esp_mqtt_client_init(&mqttConfig);
     esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, client);
     esp_mqtt_client_start(client);
 }
 
+void mqtt_app_stop(){
+    // ESP_ERROR_CHECK(esp_mqtt_client_disconnect(client));
 
-void Publisher_Task(void *params){
-    float LAT=0;
-    float LON=0;
-    float ADC=0;
+    if (client != NULL) {
+        esp_err_t err = esp_mqtt_client_disconnect(client);
+        if (err != ESP_OK) {
+            printf("Error al desconectar el cliente MQTT: %s\n", esp_err_to_name(err));
+        }
+    } else {
+        printf("El cliente MQTT es NULL. No se puede desconectar.\n");
+    }
+}
 
-    // Crear un objeto JSON
+void Publisher_Task(){
+
+    Datos DatosWIFI;
+
     cJSON *root = cJSON_CreateObject();
     
-    while (true)
-    {
-        if(estadoModo == CONECTAR_WIFI){
-            
-            cJSON_AddStringToObject(root, "name", NAME);//añado nombre al dispositivo emisor
-
-            if(xQueueReceive(ColaLAT,&LAT,pdMS_TO_TICKS(100))){
-                //printf("Dato recibido: %f\n", LAT);
-                cJSON_AddNumberToObject(root, "latitud", LAT);
-            }
-            if(xQueueReceive(ColaLON,&LON,pdMS_TO_TICKS(100))){
-                //printf("Dato recibido: %f\n", LON);
-                cJSON_AddNumberToObject(root, "longitud", LON);
-            }
-            if(xQueueReceive(ColaADC,&ADC,pdMS_TO_TICKS(100))){
-                //printf("Dato recibido: %f\n", ADC);
-                cJSON_AddNumberToObject(root, "potencia", ADC);
-            }
-
-            // // Convertir el objeto JSON a una cadena JSON
-            char *json_string = cJSON_Print(root);
-
-            //Si consigue conectarse al broker habilita la tarea para publicar datos
-            if(MQTT_CONNEECTED){
-
-                ESP_LOGI("tarea MQTT", "Conectado, Enviando mensaje\n");
-                
-                // Publicar la cadena JSON a través del cliente MQTT
-                esp_mqtt_client_publish(client, "inTopic", json_string, strlen(json_string), 0, 0);
-            }
-            else{
-                ESP_LOGI("tarea MQTT", "Sin conectar\n");
-
-            }
-            free(json_string);    
-        }
-        else
-        {
-            deshabilitar_MQTT();
-        }
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-        
+    if(xQueueReceive(ColaDatos, &DatosWIFI, portMAX_DELAY) != pdPASS) {
+        ESP_LOGE("WIFI", "Error al recibir la cola WIFI");
     }
+    else{
+        cJSON_AddStringToObject(root, "Name", NAME);//añado nombre al dispositivo emisor
+
+        cJSON_AddNumberToObject(root, "Latitud",    DatosWIFI.LAT);
+        cJSON_AddNumberToObject(root, "Longitud",   DatosWIFI.LON);
+        cJSON_AddNumberToObject(root, "Voltaje",    DatosWIFI.VOL);
+        cJSON_AddNumberToObject(root, "Potencia",   DatosWIFI.POT);
+
+        cJSON_AddNumberToObject(root, "Mes",        DatosWIFI.MES);
+        cJSON_AddNumberToObject(root, "Dia",        DatosWIFI.DIA);
+        cJSON_AddNumberToObject(root, "Hora",       DatosWIFI.HORA);
+        cJSON_AddNumberToObject(root, "Minutos",    DatosWIFI.MIN);
+    }
+    
+    if(MQTT_CONNEECTED){
+        // // Convertir el objeto JSON a una cadena JSON
+        char *json_string = cJSON_Print(root);
+
+        ESP_LOGI("MQTT", "Conectado, Enviando mensaje\n");
+
+        //esp_mqtt_client_publish(esp_mqtt_client_handle_t client ,const char *topic ,const char *data ,int len,int qos ,int retain);
+        esp_mqtt_client_publish(client,MQTT_Topico,json_string,strlen(json_string),0,0);
+
+        free(json_string);
+    }
+    else{
+        ESP_LOGI("tarea MQTT", "Sin conectar\n");
+    }
+
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+
     // Liberar memoria
     cJSON_Delete(root);
-    
 }
 
-TaskHandle_t xHandle;
+#define MAX_NETWORKS 20
+static const char *WIFI_TAG = "WIFI_SCAN";
 
-void subir_datos_MQTT(void)
-{
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
-    {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
+redesWIFI_t wifi_scan_task(void) {
+    redesWIFI_t REDES;
+
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_start());
+
+    wifi_scan_config_t scan_config = {
+        .ssid = NULL,
+        .bssid = NULL,
+        .channel = 0,
+        .show_hidden = false
+    };
+
+    ESP_ERROR_CHECK(esp_wifi_scan_start(&scan_config, true));
+
+    REDES.num_networks = MAX_NETWORKS;
+
+    ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&REDES.num_networks, REDES.ap_records));
+
+    ESP_LOGI(WIFI_TAG, "Found %d networks:", REDES.num_networks);
+
+    for (int i = 0; i < REDES.num_networks; i++) {
+        ESP_LOGI(WIFI_TAG, "SSID: %s", REDES.ap_records[i].ssid);
     }
-    ESP_ERROR_CHECK(ret);
 
-    wifi_init();
+    ESP_ERROR_CHECK(esp_wifi_stop());
 
-    BaseType_t res4 = xTaskCreatePinnedToCore(
-            Publisher_Task,                     	// Funcion de la tarea a ejecutar
-            "Publisher_Task",   	                // Nombre de la tarea como String amigable para el usuario
-            configMINIMAL_STACK_SIZE*6, 		// Cantidad de stack de la tarea
-            NULL,                          	    // Parametros de tarea
-            tskIDLE_PRIORITY+1,         	    // Prioridad de la tarea -> Queremos que este un nivel encima de IDLE
-            &xHandle,                          		// Puntero a la tarea creada en el sistema
-            PROCESADORB                         // Procesador donde se ejecuta
-        );
-        
-    if(res4 == pdFAIL){
-        printf( "Error al crear la tarea.\r\n" );
-        while(true);					// si no pudo crear la tarea queda en un bucle infinito
-    }
-}
-
-void deshabilitar_MQTT(void){
-    esp_wifi_deinit();
-    vTaskDelete(xHandle);
+    return REDES;
 }

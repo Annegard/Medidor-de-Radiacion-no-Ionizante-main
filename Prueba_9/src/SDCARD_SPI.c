@@ -99,14 +99,15 @@ void TareaSD(){
     }                          
 }
 
+int contador = 0;
+
 static void guardarDatosEnCSV(Datos Datos) {
 
-    FILE *f = fopen(MOUNT_POINT"/datos.csv", "a");
+ FILE *f = fopen(MOUNT_POINT"/datos.csv", "a");
     
     if (f == NULL) {
         ESP_LOGE("SDCARD", "Error al abrir/crear el archivo CSV");
-
-        static int contador = 0;
+        
         contador++;
 
         if (contador==5){
@@ -122,7 +123,7 @@ static void guardarDatosEnCSV(Datos Datos) {
             inicializarSDCARD();
             vTaskDelay(pdMS_TO_TICKS(1000));
         }
-        
+        return;
     }
     // printf("%d,%d,%d,%d,%.2f,%.2f,%.2f,%.2f\n"  ,Datos.MES, Datos.DIA
     //                                             ,Datos.HORA, Datos.MIN
